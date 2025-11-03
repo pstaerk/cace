@@ -99,11 +99,11 @@ q = cace.modules.Atomwise(
 #                     remove_self_interaction=False,
 #                    aggregation_mode='sum')
 ep = cace.modules.CoulombPotential(feature_key='q',
-                    output_key='coulomb_potential',
-                    aggregation_mode='sum')
+                                   output_key='coulomb_potential',
+                                   aggregation_mode='sum')
 
 e_add = cace.modules.FeatureAdd(feature_keys=['SR_energy', 'coulomb_potential'],
-                 output_key='CACE_energy')
+                                output_key='CACE_energy')
 
 forces = cace.modules.Forces(energy_key='CACE_energy',
                              forces_key='CACE_forces')
@@ -199,7 +199,64 @@ print(f"Current VRAM allocated: {torch.cuda.memory_allocated(device) / 1024**2:.
 print(f"Max VRAM allocated:     {torch.cuda.max_memory_allocated(device) / 1024**2:.2f} MB")
 print(f"Current VRAM reserved:  {torch.cuda.memory_reserved(device) / 1024**2:.2f} MB")
 print(f"Max VRAM reserved:      {torch.cuda.max_memory_reserved(device) / 1024**2:.2f} MB")
-task.fit(train_loader, valid_loader, epochs=40, screen_nan=False, print_stride=0)
+
+# Add charge monitoring during training
+def monitor_charges(model, loader, device, epoch):
+    """Monitor charge predictions during validation"""
+    model.eval()
+    all_charges = []
+    all_atomic_numbers = []
+    total_charge_squared = []
+    
+    with torch.no_grad():
+        for batch in loader:
+            batch = {key: val.to(device) if isinstance(val, torch.Tensor) else val 
+                    for key, val in batch.items()}
+            outputs = model(batch)
+            
+            charges = outputs['q']  # per-atom charges
+            atomic_numbers = batch['atomic_numbers']
+            
+            all_charges.append(charges.cpu())
+            all_atomic_numbers.append(atomic_numbers.cpu())
+            
+            # Calculate sum of charges squared per structure
+            if batch['batch'] is not None:
+                for i in torch.unique(batch['batch']):
+                    mask = batch['batch'] == i
+                    q_sum_sq = (charges[mask].sum())**2
+                    total_charge_squared.append(q_sum_sq.item())
+    
+    all_charges = torch.cat(all_charges, dim=0)
+    all_atomic_numbers = torch.cat(all_atomic_numbers, dim=0)
+    
+    # Statistics by element
+    logging.info(f"\n=== Charge Statistics (Epoch {epoch}) ===")
+    for z in torch.unique(all_atomic_numbers):
+        mask = all_atomic_numbers == z
+        z_charges = all_charges[mask]
+        logging.info(f"Element Z={z.item()}: mean={z_charges.mean():.4f}, "
+                    f"std={z_charges.std():.4f}, "
+                    f"min={z_charges.min():.4f}, max={z_charges.max():.4f}")
+    
+    # Overall statistics
+    logging.info(f"All atoms: mean={all_charges.mean():.4f}, "
+                f"std={all_charges.std():.4f}")
+    logging.info(f"Total charge per structure: mean(Q²)={np.mean(total_charge_squared):.6f}, "
+                f"std(Q²)={np.std(total_charge_squared):.6f}")
+    logging.info("=" * 50 + "\n")
+
+# Training loop with periodic charge monitoring
+epochs = 40
+check_every = 10  # Check charges every 10 epochs
+
+for epoch in range(epochs):
+    # Train for one epoch
+    task.fit(train_loader, valid_loader, epochs=1, screen_nan=False, print_stride=0)
+    
+    # Monitor charges periodically
+    if (epoch + 1) % check_every == 0 or epoch == 0:
+        monitor_charges(cace_nnp, valid_loader, device, epoch + 1)
 
 task.save_model('water-model.pth')
 cace_nnp.to(device)
