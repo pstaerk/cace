@@ -210,22 +210,37 @@ def monitor_charges(model, loader, device, epoch):
     
     with torch.no_grad():
         for batch in loader:
-            batch = {key: val.to(device) if isinstance(val, torch.Tensor) else val 
-                    for key, val in batch.items()}
-            outputs = model(batch)
+            # Convert batch to dictionary if needed
+            if hasattr(batch, 'to_dict'):
+                batch_dict = batch.to_dict()
+            elif hasattr(batch, '__dict__'):
+                batch_dict = {k: v for k, v in batch.__dict__.items() if not k.startswith('_')}
+            else:
+                batch_dict = batch
+            
+            # Move tensors to device
+            batch_dict = {key: val.to(device) if isinstance(val, torch.Tensor) else val 
+                         for key, val in batch_dict.items()}
+            
+            outputs = model(batch_dict)
             
             charges = outputs['q']  # per-atom charges
-            atomic_numbers = batch['atomic_numbers']
+            atomic_numbers = batch_dict['atomic_numbers']
+            batch_indices = batch_dict.get('batch', None)
             
             all_charges.append(charges.cpu())
             all_atomic_numbers.append(atomic_numbers.cpu())
             
             # Calculate sum of charges squared per structure
-            if batch['batch'] is not None:
-                for i in torch.unique(batch['batch']):
-                    mask = batch['batch'] == i
+            if batch_indices is not None:
+                for i in torch.unique(batch_indices):
+                    mask = batch_indices == i
                     q_sum_sq = (charges[mask].sum())**2
                     total_charge_squared.append(q_sum_sq.item())
+            else:
+                # Single structure case
+                q_sum_sq = charges.sum()**2
+                total_charge_squared.append(q_sum_sq.item())
     
     all_charges = torch.cat(all_charges, dim=0)
     all_atomic_numbers = torch.cat(all_atomic_numbers, dim=0)
