@@ -203,7 +203,10 @@ print(f"Max VRAM reserved:      {torch.cuda.max_memory_reserved(device) / 1024**
 # Add charge monitoring during training
 def monitor_charges(model, loader, device, epoch):
     """Monitor charge predictions during validation"""
+    # Save current training state
+    was_training = model.training
     model.eval()
+    
     all_charges = []
     all_atomic_numbers = []
     total_charge_squared = []
@@ -222,7 +225,8 @@ def monitor_charges(model, loader, device, epoch):
             batch_dict = {key: val.to(device) if isinstance(val, torch.Tensor) else val 
                          for key, val in batch_dict.items()}
             
-            outputs = model(batch_dict)
+            # Call model without training flag to avoid gradient computation
+            outputs = model(batch_dict, training=False)
             
             charges = outputs['q']  # per-atom charges
             atomic_numbers = batch_dict['atomic_numbers']
@@ -260,6 +264,10 @@ def monitor_charges(model, loader, device, epoch):
     logging.info(f"Total charge per structure: mean(Q²)={np.mean(total_charge_squared):.6f}, "
                 f"std(Q²)={np.std(total_charge_squared):.6f}")
     logging.info("=" * 50 + "\n")
+    
+    # Restore training state
+    if was_training:
+        model.train()
 
 # Training loop with periodic charge monitoring
 epochs = 40
