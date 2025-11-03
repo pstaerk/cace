@@ -24,7 +24,7 @@ cutoff = 5.
 
 logging.info("reading data")
 # collection = cace.tasks.get_dataset_from_xyz(train_path='../../training_set/H2O_BEC.xyz',
-collection = cace.tasks.get_dataset_from_xyz(train_path='/work/pstaerk_m3/ml_nacl/datasets_ml/bingqing_finite_apt/training_data.xyz',
+collection = cace.tasks.get_dataset_from_xyz(train_path='/work/pstaerk/datasets_ml/water_clusters/training_data.xyz',
                                  valid_fraction=0.1,
                                  seed=1,
                                  cutoff=cutoff,
@@ -92,14 +92,17 @@ q = cace.modules.Atomwise(
     add_linear_nn=True,
     bias=False)
 
-ep = cace.modules.EwaldPotential(dl=2,
-                    sigma=1.0,
-                    feature_key='q',
-                    output_key='ewald_potential',
-                    remove_self_interaction=False,
-                   aggregation_mode='sum')
+# ep = cace.modules.EwaldPotential(dl=2,
+#                     sigma=1.0,
+#                     feature_key='q',
+#                     output_key='ewald_potential',
+#                     remove_self_interaction=False,
+#                    aggregation_mode='sum')
+ep = cace.modules.CoulombPotential(feature_key='q',
+                    output_key='coulomb_potential',
+                    aggregation_mode='sum')
 
-e_add = cace.modules.FeatureAdd(feature_keys=['SR_energy', 'ewald_potential'],
+e_add = cace.modules.FeatureAdd(feature_keys=['SR_energy', 'coulomb_potential'],
                  output_key='CACE_energy')
 
 forces = cace.modules.Forces(energy_key='CACE_energy',
